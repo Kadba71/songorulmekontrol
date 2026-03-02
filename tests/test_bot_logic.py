@@ -1,5 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, patch
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import bot
 
@@ -16,6 +18,13 @@ class BotUtilityTests(unittest.TestCase):
         self.assertEqual(bot.format_responsible(None), "-")
         self.assertEqual(bot.format_responsible("-"), "-")
         self.assertEqual(bot.format_responsible("manager"), "@manager")
+
+    def test_should_skip_for_break_window(self) -> None:
+        now_local = datetime(2026, 3, 2, 14, 30, tzinfo=ZoneInfo("Europe/Istanbul"))
+        self.assertTrue(bot.should_skip_for_break_window(now_local, "14:00", "15:00"))
+
+        after_resume = datetime(2026, 3, 2, 15, 10, tzinfo=ZoneInfo("Europe/Istanbul"))
+        self.assertFalse(bot.should_skip_for_break_window(after_resume, "14:00", "15:00"))
 
 
 class MonitorJobTests(unittest.IsolatedAsyncioTestCase):
@@ -43,6 +52,7 @@ class MonitorJobTests(unittest.IsolatedAsyncioTestCase):
             patch.object(bot, "is_within_monitor_hours", return_value=True),
             patch.object(bot, "resolve_target_chat_id", return_value=-100987654321),
             patch.object(bot, "resolve_last_seen_minutes", new=AsyncMock(return_value=(15, "15 dakika"))),
+            patch.object(bot.database, "get_break_window", return_value=(None, None)),
             patch.object(bot.database, "list_personnel", return_value=[row]),
             patch.object(bot.database, "get_watch_state", return_value=None),
             patch.object(bot.database, "get_department_responsibles", return_value=[]),
@@ -56,6 +66,27 @@ class MonitorJobTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Sorumlu : -", sent_text)
         add_violation_event.assert_called_once()
         set_watch_state.assert_called_once()
+
+    async def test_monitor_job_skips_during_break_window(self) -> None:
+        context = type("Ctx", (), {})()
+        context.bot = type("DummyBot", (), {"send_message": AsyncMock()})()
+
+        async def passthrough(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        now_local = datetime(2026, 3, 2, 14, 30, tzinfo=ZoneInfo("Europe/Istanbul"))
+
+        with (
+            patch.object(bot, "db_call", new=passthrough),
+            patch.object(bot, "is_within_monitor_hours", return_value=True),
+            patch.object(bot, "get_now_local", return_value=now_local),
+            patch.object(bot.database, "get_break_window", return_value=("14:00", "15:00")),
+            patch.object(bot.database, "list_personnel") as list_personnel,
+        ):
+            await bot.monitor_job(context)
+
+        context.bot.send_message.assert_not_awaited()
+        list_personnel.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -115,6 +115,34 @@ def parse_hour_text(text: str) -> int | None:
         return None
 
 
+def parse_hhmm(text: str) -> time | None:
+    raw = text.strip()
+    parts = raw.split(":")
+    if len(parts) != 2:
+        return None
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1])
+    except ValueError:
+        return None
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return time(hour=hour, minute=minute)
+
+
+def should_skip_for_break_window(now_dt: datetime, break_start_hhmm: str, break_end_hhmm: str) -> bool:
+    start_time = parse_hhmm(break_start_hhmm)
+    end_time = parse_hhmm(break_end_hhmm)
+    if start_time is None or end_time is None:
+        return False
+    if start_time >= end_time:
+        return False
+
+    break_start = datetime.combine(now_dt.date(), start_time, tzinfo=now_dt.tzinfo)
+    break_resume = datetime.combine(now_dt.date(), end_time, tzinfo=now_dt.tzinfo) + timedelta(minutes=10)
+    return break_start <= now_dt < break_resume
+
+
 async def db_call(func, *args, **kwargs):
     return await asyncio.to_thread(func, *args, **kwargs)
 
@@ -188,6 +216,8 @@ def build_help_text() -> str:
         "/izin (personel @) -> Personel bugün kontrol edilmez.\n\n"
         "/saatlikizin (personel @), (saat) -> Personel belirtilen saat boyunca kontrol edilmez.\n"
         "Örn: /saatlikizin @ahmet_taha, 2 saat\n\n"
+        "/mola (HH:MM), (HH:MM) -> Bu aralıkta kontrol durur, bitişten 10 dk sonra başlar.\n"
+        "Örn: /mola 14:00, 15:00 (kontrol 15:10'da başlar)\n\n"
         "/yukle -> Excel dosyasını toplu personel ekleme için işler.\n"
         "Kullanım: Excel dosyasını gruba /yukle açıklamasıyla gönderin.\n\n"
         "/rapor (departman) -> İlgili departmanın bugünkü ihlal adetlerini listeler.\n"
@@ -431,6 +461,43 @@ async def saatlikizin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     ok = await db_call(database.set_personnel_hourly_off, personnel, until_dt.isoformat())
     await update.message.reply_text(
         f"Personel {hours} saat izinli olarak işaretlendi." if ok else "Personel bulunamadı."
+    )
+
+
+async def mola_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_auth(update):
+        return
+
+    args_text = update.message.text.partition(" ")[2].strip()
+    if not args_text:
+        current_start, current_end = await db_call(database.get_break_window)
+        if current_start and current_end:
+            await update.message.reply_text(
+                f"Mevcut mola aralığı: {current_start}-{current_end} (kontrol {current_end} sonrası 10 dk bekler)."
+            )
+        else:
+            await update.message.reply_text("Kullanım: /mola 14:00,15:00")
+        return
+
+    parts = parse_csv_args(args_text)
+    if len(parts) != 2:
+        await update.message.reply_text("Kullanım: /mola 14:00,15:00")
+        return
+
+    start_text, end_text = parts[0], parts[1]
+    start_time = parse_hhmm(start_text)
+    end_time = parse_hhmm(end_text)
+    if start_time is None or end_time is None:
+        await update.message.reply_text("Saat formatı hatalı. Örnek: /mola 14:00,15:00")
+        return
+    if start_time >= end_time:
+        await update.message.reply_text("Başlangıç saati bitişten küçük olmalı.")
+        return
+
+    await db_call(database.set_break_window, start_text, end_text)
+    resume_time = (datetime.combine(date.today(), end_time) + timedelta(minutes=10)).strftime("%H:%M")
+    await update.message.reply_text(
+        f"Mola aralığı kaydedildi: {start_text}-{end_text}. Kontrol {resume_time} itibarıyla devam eder."
     )
 
 
@@ -717,6 +784,12 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_within_monitor_hours():
         return
 
+    break_start_hhmm, break_end_hhmm = await db_call(database.get_break_window)
+    if break_start_hhmm and break_end_hhmm:
+        now_local = get_now_local()
+        if should_skip_for_break_window(now_local, break_start_hhmm, break_end_hhmm):
+            return
+
     records = await db_call(database.list_personnel)
     if not records:
         return
@@ -931,6 +1004,7 @@ def build_app() -> Application:
     application.add_handler(CommandHandler("haftalikizin", haftalikizin_cmd))
     application.add_handler(CommandHandler("izin", izin_cmd))
     application.add_handler(CommandHandler("saatlikizin", saatlikizin_cmd))
+    application.add_handler(CommandHandler("mola", mola_cmd))
     application.add_handler(CommandHandler("yukle", yukle_cmd))
     application.add_handler(CommandHandler("rapor", rapor_cmd))
     application.add_handler(CommandHandler("listele", listele_cmd))

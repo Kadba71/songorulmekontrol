@@ -31,6 +31,15 @@ def init_db() -> None:
     with get_conn() as conn:
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS responsibles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE,
@@ -395,3 +404,38 @@ def get_daily_violation_counts(occurred_date: str) -> list[sqlite3.Row]:
             """,
             (occurred_date,),
         ).fetchall()
+
+
+def set_break_window(start_hhmm: str, end_hhmm: str) -> None:
+    with get_conn() as conn:
+        now_iso = _utcnow_iso()
+        conn.execute(
+            """
+            INSERT INTO app_settings(key, value, updated_at)
+            VALUES(?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """,
+            ("break_start_hhmm", start_hhmm, now_iso),
+        )
+        conn.execute(
+            """
+            INSERT INTO app_settings(key, value, updated_at)
+            VALUES(?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """,
+            ("break_end_hhmm", end_hhmm, now_iso),
+        )
+
+
+def get_break_window() -> tuple[str | None, str | None]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT key, value FROM app_settings WHERE key IN (?, ?)",
+            ("break_start_hhmm", "break_end_hhmm"),
+        ).fetchall()
+    values = {str(row["key"]): row["value"] for row in rows}
+    return values.get("break_start_hhmm"), values.get("break_end_hhmm")

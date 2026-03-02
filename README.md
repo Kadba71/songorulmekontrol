@@ -44,6 +44,7 @@ python bot.py
 - `/haftalikizin satısekibi1, çarşamba`
 - `/izin @ahmet_taha`
 - `/saatlikizin @ahmet_taha, 2 saat`
+- `/mola 14:00,15:00` (bu aralıkta kontrol durur, bitişten 10 dakika sonra devam eder)
 - `/yukle` (Excel dosyasını açıklama/caption olarak `/yukle` yazarak gönderin)
 - `/rapor satısekibi1` (ilgili departmanın gün içi kural ihlali adedi)
 - `/listele`
@@ -80,6 +81,7 @@ Departman : satısekibi3
 - Haftalık izin günü tanımlanan departmanlar o gün taranmaz.
 - `/izin` ile işaretlenen personel gün boyu taranmaz.
 - `/saatlikizin` ile işaretlenen personel belirtilen süre boyunca taranmaz.
+- `/mola` ile tanımlanan saat aralığında tarama yapılmaz; bitiş saatinden 10 dakika sonra tarama yeniden başlar.
 
 ## Dikkat
 

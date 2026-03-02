@@ -34,6 +34,19 @@ class DatabaseTests(unittest.TestCase):
             finally:
                 database.DB_PATH = original_db_path
 
+    def test_set_and_get_break_window(self) -> None:
+        original_db_path = database.DB_PATH
+        with tempfile.TemporaryDirectory() as tmpdir:
+            database.DB_PATH = Path(tmpdir) / "test_bot_data.sqlite3"
+            try:
+                database.init_db()
+                database.set_break_window("14:00", "15:00")
+                start_hhmm, end_hhmm = database.get_break_window()
+                self.assertEqual(start_hhmm, "14:00")
+                self.assertEqual(end_hhmm, "15:00")
+            finally:
+                database.DB_PATH = original_db_path
+
 
 if __name__ == "__main__":
     unittest.main()
