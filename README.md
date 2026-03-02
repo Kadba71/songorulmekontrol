@@ -103,8 +103,19 @@ Departman : satısekibi3
 	- `TELEGRAM_API_HASH`
 	- `TELETHON_STRING_SESSION`
 	- `APP_TIMEZONE` (ör. `Europe/Istanbul`)
+	- `DB_PATH` (öneri: `/data/bot_data.sqlite3`)
 	- İhtiyaca göre diğer ayarlar (`CHECK_INTERVAL_SECONDS`, `ALERT_COOLDOWN_MINUTES` vb.)
 4. Bu repo içindeki `railway.json` dosyası ile Railway botu `python bot.py` komutuyla worker olarak başlatır.
+5. Railway'de bir **Volume** oluşturup servise bağlayın (mount path örn: `/data`) ve `DB_PATH=/data/bot_data.sqlite3` kullanın.
+
+## Kayıtların Kalıcı ve Temiz Yönetimi
+
+- Personel ekleme/güncelleme: `/personelekle @personel, @sorumlu, departman`
+- Personel silme: `/silpersonel @personel`
+- Departmana sorumlu ekleme: `/eklesorumlu @sorumlu, departman`
+- Departmandan sorumlu silme: `/silsorumlu @sorumlu, departman`
+
+Bu şekilde sistem personel ve departman sorumlularını ayrı tabloda tuttuğu için birbirini karıştırmaz.
 
 ### Önemli Not (Daha önce sızdırıldıysa)
 

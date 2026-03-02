@@ -1,9 +1,10 @@
 import sqlite3
+import os
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-DB_PATH = Path(__file__).with_name("bot_data.sqlite3")
+DB_PATH = Path(os.getenv("DB_PATH", str(Path(__file__).with_name("bot_data.sqlite3"))))
 
 
 def normalize_username(username: str) -> str:
@@ -15,6 +16,7 @@ def normalize_username(username: str) -> str:
 
 @contextmanager
 def get_conn():
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
