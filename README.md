@@ -43,7 +43,9 @@ python bot.py
 - `/sildepartman satısekibi1`
 - `/haftalikizin satısekibi1, çarşamba`
 - `/izin @ahmet_taha`
+- `/iziniptal @ahmet_taha, satısekibi1`
 - `/saatlikizin @ahmet_taha, 2 saat`
+- `/saatlikiziniptal @ahmet_taha, satısekibi1`
 - `/mola 14:00,15:00` (bu aralıkta kontrol durur, bitişten 10 dakika sonra devam eder)
 - `/yukle` (Excel dosyasını açıklama/caption olarak `/yukle` yazarak gönderin)
 - `/rapor satısekibi1` (ilgili departmanın gün içi kural ihlali adedi)

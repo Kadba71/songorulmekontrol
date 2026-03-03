@@ -335,6 +335,48 @@ def set_personnel_hourly_off(username: str, until_iso: str) -> bool:
         return cur.rowcount > 0
 
 
+def cancel_personnel_hourly_off(username: str, department_name: str) -> bool:
+    username = normalize_username(username)
+    department_name = department_name.strip()
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            UPDATE personnel
+            SET exempt_until = NULL
+            WHERE username = ?
+              AND exempt_until IS NOT NULL
+              AND department_id = (
+                  SELECT id
+                  FROM departments
+                  WHERE name = ?
+              )
+            """,
+            (username, department_name),
+        )
+        return cur.rowcount > 0
+
+
+def cancel_personnel_day_off(username: str, department_name: str) -> bool:
+    username = normalize_username(username)
+    department_name = department_name.strip()
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            UPDATE personnel
+            SET day_off_date = NULL
+            WHERE username = ?
+              AND day_off_date IS NOT NULL
+              AND department_id = (
+                  SELECT id
+                  FROM departments
+                  WHERE name = ?
+              )
+            """,
+            (username, department_name),
+        )
+        return cur.rowcount > 0
+
+
 def get_watch_state(personnel_id: int) -> sqlite3.Row | None:
     with get_conn() as conn:
         return conn.execute(

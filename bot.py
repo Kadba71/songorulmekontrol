@@ -214,8 +214,13 @@ def build_help_text() -> str:
         "/haftalikizin (departman), (gün) -> O gün departman kontrol edilmez.\n"
         "Örn: /haftalikizin satısekibi1, çarşamba\n\n"
         "/izin (personel @) -> Personel bugün kontrol edilmez.\n\n"
+        "/iziniptal (personel @), (departman) -> Personelin tam gün iznini iptal eder.\n"
+        "Örn: /iziniptal @ahmet_taha, satısekibi1\n\n"
+
         "/saatlikizin (personel @), (saat) -> Personel belirtilen saat boyunca kontrol edilmez.\n"
         "Örn: /saatlikizin @ahmet_taha, 2 saat\n\n"
+        "/saatlikiziniptal (personel @), (departman) -> Personelin saatlik iznini iptal eder.\n"
+        "Örn: /saatlikiziniptal @ahmet_taha, satısekibi1\n\n"
         "/mola (HH:MM), (HH:MM) -> Bu aralıkta kontrol durur, bitişten 10 dk sonra başlar.\n"
         "Örn: /mola 14:00, 15:00 (kontrol 15:10'da başlar)\n\n"
         "/yukle -> Excel dosyasını toplu personel ekleme için işler.\n"
@@ -461,6 +466,44 @@ async def saatlikizin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     ok = await db_call(database.set_personnel_hourly_off, personnel, until_dt.isoformat())
     await update.message.reply_text(
         f"Personel {hours} saat izinli olarak işaretlendi." if ok else "Personel bulunamadı."
+    )
+
+
+async def saatlikiziniptal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_auth(update):
+        return
+    args_text = update.message.text.partition(" ")[2]
+    parts = parse_csv_args(args_text)
+    if len(parts) != 2:
+        await update.message.reply_text("Kullanım: /saatlikiziniptal @ahmet_taha, satısekibi1")
+        return
+
+    personnel = parts[0]
+    department = parts[1]
+    ok = await db_call(database.cancel_personnel_hourly_off, personnel, department)
+    await update.message.reply_text(
+        "Personelin izni iptal edilmiştir. Son görülmesi kontrol edilecektir artık."
+        if ok
+        else "Aktif saatlik izin bulunamadı veya personel/departman eşleşmedi."
+    )
+
+
+async def iziniptal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_auth(update):
+        return
+    args_text = update.message.text.partition(" ")[2]
+    parts = parse_csv_args(args_text)
+    if len(parts) != 2:
+        await update.message.reply_text("Kullanım: /iziniptal @ahmet_taha, satısekibi1")
+        return
+
+    personnel = parts[0]
+    department = parts[1]
+    ok = await db_call(database.cancel_personnel_day_off, personnel, department)
+    await update.message.reply_text(
+        "Personelin tam gün izni iptal edilmiştir. Artık personelin son görülmesi takip edilecektir."
+        if ok
+        else "Aktif tam gün izin bulunamadı veya personel/departman eşleşmedi."
     )
 
 
@@ -1004,6 +1047,8 @@ def build_app() -> Application:
     application.add_handler(CommandHandler("haftalikizin", haftalikizin_cmd))
     application.add_handler(CommandHandler("izin", izin_cmd))
     application.add_handler(CommandHandler("saatlikizin", saatlikizin_cmd))
+    application.add_handler(CommandHandler("iziniptal", iziniptal_cmd))
+    application.add_handler(CommandHandler("saatlikiziniptal", saatlikiziniptal_cmd))
     application.add_handler(CommandHandler("mola", mola_cmd))
     application.add_handler(CommandHandler("yukle", yukle_cmd))
     application.add_handler(CommandHandler("rapor", rapor_cmd))

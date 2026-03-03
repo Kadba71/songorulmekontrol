@@ -47,6 +47,36 @@ class DatabaseTests(unittest.TestCase):
             finally:
                 database.DB_PATH = original_db_path
 
+    def test_cancel_personnel_hourly_off_with_department(self) -> None:
+        original_db_path = database.DB_PATH
+        with tempfile.TemporaryDirectory() as tmpdir:
+            database.DB_PATH = Path(tmpdir) / "test_bot_data.sqlite3"
+            try:
+                database.init_db()
+                database.add_personnel("@ali", "@yonetici", "satis")
+                database.set_personnel_hourly_off("@ali", "2026-03-02T12:00:00+03:00")
+
+                self.assertTrue(database.cancel_personnel_hourly_off("@ali", "satis"))
+                self.assertFalse(database.cancel_personnel_hourly_off("@ali", "satis"))
+                self.assertFalse(database.cancel_personnel_hourly_off("@ali", "muhasebe"))
+            finally:
+                database.DB_PATH = original_db_path
+
+    def test_cancel_personnel_day_off_with_department(self) -> None:
+        original_db_path = database.DB_PATH
+        with tempfile.TemporaryDirectory() as tmpdir:
+            database.DB_PATH = Path(tmpdir) / "test_bot_data.sqlite3"
+            try:
+                database.init_db()
+                database.add_personnel("@veli", "@yonetici", "satis")
+                database.set_personnel_day_off_today("@veli", "2026-03-02")
+
+                self.assertTrue(database.cancel_personnel_day_off("@veli", "satis"))
+                self.assertFalse(database.cancel_personnel_day_off("@veli", "satis"))
+                self.assertFalse(database.cancel_personnel_day_off("@veli", "muhasebe"))
+            finally:
+                database.DB_PATH = original_db_path
+
 
 if __name__ == "__main__":
     unittest.main()
