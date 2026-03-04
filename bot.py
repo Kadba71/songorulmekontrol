@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from dotenv import load_dotenv
 from openpyxl import load_workbook
 from telegram import Update
+from telegram.error import TelegramError
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telethon import TelegramClient
 from telethon.sessions import StringSession
@@ -915,7 +916,18 @@ def should_notify_non_numeric_status(status_text: str) -> bool:
         "gizli",
         "bilinmiyor",
     }
-    return status_text in informative_statuses or status_text.startswith("hata:")
+    return status_text in informative_statuses
+
+
+async def safe_send_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str) -> bool:
+    max_len = 4000
+    payload = text if len(text) <= max_len else text[: max_len - 1] + "…"
+    try:
+        await context.bot.send_message(chat_id=chat_id, text=payload)
+        return True
+    except TelegramError:
+        logger.exception("Telegram mesaj gönderimi başarısız (chat_id=%s)", chat_id)
+        return False
 
 
 async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1005,8 +1017,9 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                     f"Departman : {department}"
                     f"{department_mentions}"
                 )
-                await context.bot.send_message(chat_id=target_chat_id, text=message)
-                numeric_alerts += 1
+                sent_ok = await safe_send_message(context, target_chat_id, message)
+                if sent_ok:
+                    numeric_alerts += 1
                 now_local = get_now_local()
                 await db_call(
                     database.add_violation_event,
@@ -1039,8 +1052,9 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                     f"Departman : {department}"
                     f"{department_mentions}"
                 )
-                await context.bot.send_message(chat_id=target_chat_id, text=message)
-                non_numeric_alerts += 1
+                sent_ok = await safe_send_message(context, target_chat_id, message)
+                if sent_ok:
+                    non_numeric_alerts += 1
                 await db_call(
                     database.set_watch_state,
                     personnel_id=personnel_id,
