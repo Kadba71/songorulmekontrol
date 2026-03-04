@@ -915,21 +915,28 @@ def should_notify_non_numeric_status(status_text: str) -> bool:
         "gizli",
         "bilinmiyor",
     }
-    return status_text in informative_statuses
+    return status_text in informative_statuses or status_text.startswith("hata:")
 
 
 async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_within_monitor_hours():
+        logger.info("Monitor atlandı: çalışma saatleri dışında.")
         return
 
     break_start_hhmm, break_end_hhmm = await db_call(database.get_break_window)
     if break_start_hhmm and break_end_hhmm:
         now_local = get_now_local()
         if should_skip_for_break_window(now_local, break_start_hhmm, break_end_hhmm):
+            logger.info(
+                "Monitor atlandı: mola aralığı aktif (%s-%s).",
+                break_start_hhmm,
+                break_end_hhmm,
+            )
             return
 
     records = await db_call(database.list_personnel)
     if not records:
+        logger.info("Monitor atlandı: aktif personel yok.")
         return
 
     target_chat_id = resolve_target_chat_id()
@@ -938,6 +945,14 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     today_name = today_weekday_tr()
+    total_count = len(records)
+    skipped_weekly_off = 0
+    skipped_day_off = 0
+    skipped_hourly_off = 0
+    numeric_alerts = 0
+    non_numeric_alerts = 0
+    below_threshold = 0
+    unresolved_status = 0
 
     for r in records:
         personnel_id = int(r["id"])
@@ -949,10 +964,12 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         department = department_name or "-"
 
         if should_skip_for_department_weekly_off(department_name, r["department_weekly_off_day"], today_name):
+            skipped_weekly_off += 1
             continue
 
         day_off_date = r["day_off_date"]
         if day_off_date and day_off_date == get_today_local_iso():
+            skipped_day_off += 1
             continue
 
         exempt_until = r["exempt_until"]
@@ -962,6 +979,7 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                 if until_dt.tzinfo is None:
                     until_dt = until_dt.replace(tzinfo=timezone.utc)
                 if until_dt > datetime.now(timezone.utc):
+                    skipped_hourly_off += 1
                     continue
             except ValueError:
                 pass
@@ -988,6 +1006,7 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                     f"{department_mentions}"
                 )
                 await context.bot.send_message(chat_id=target_chat_id, text=message)
+                numeric_alerts += 1
                 now_local = get_now_local()
                 await db_call(
                     database.add_violation_event,
@@ -1021,6 +1040,7 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                     f"{department_mentions}"
                 )
                 await context.bot.send_message(chat_id=target_chat_id, text=message)
+                non_numeric_alerts += 1
                 await db_call(
                     database.set_watch_state,
                     personnel_id=personnel_id,
@@ -1030,6 +1050,10 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                     last_status_text=status_text,
                 )
         else:
+            if mins is not None and mins <= threshold:
+                below_threshold += 1
+            elif mins is None:
+                unresolved_status += 1
             await db_call(
                 database.set_watch_state,
                 personnel_id=personnel_id,
@@ -1038,6 +1062,18 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                 last_minutes=mins,
                 last_status_text=status_text,
             )
+
+    logger.info(
+        "Monitor özeti: toplam=%d, sayisal_alarm=%d, n/a_alarm=%d, weekly_skip=%d, gunluk_izin_skip=%d, saatlik_izin_skip=%d, esik_alti=%d, cozulmeyen_durum=%d",
+        total_count,
+        numeric_alerts,
+        non_numeric_alerts,
+        skipped_weekly_off,
+        skipped_day_off,
+        skipped_hourly_off,
+        below_threshold,
+        unresolved_status,
+    )
 
 
 async def daily_summary_job(context: ContextTypes.DEFAULT_TYPE) -> None:
