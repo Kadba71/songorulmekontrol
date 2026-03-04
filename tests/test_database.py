@@ -94,6 +94,22 @@ class DatabaseTests(unittest.TestCase):
             finally:
                 database.DB_PATH = original_db_path
 
+    def test_list_departments(self) -> None:
+        original_db_path = database.DB_PATH
+        with tempfile.TemporaryDirectory() as tmpdir:
+            database.DB_PATH = Path(tmpdir) / "test_bot_data.sqlite3"
+            try:
+                database.init_db()
+                database.add_department("satis")
+                database.add_department("muhasebe")
+
+                rows = database.list_departments()
+                self.assertEqual(len(rows), 2)
+                self.assertEqual(rows[0]["name"], "muhasebe")
+                self.assertEqual(rows[1]["name"], "satis")
+            finally:
+                database.DB_PATH = original_db_path
+
 
 if __name__ == "__main__":
     unittest.main()

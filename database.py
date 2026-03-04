@@ -300,6 +300,17 @@ def list_personnel() -> list[sqlite3.Row]:
         ).fetchall()
 
 
+def list_departments() -> list[sqlite3.Row]:
+    with get_conn() as conn:
+        return conn.execute(
+            """
+            SELECT id, name, threshold_minutes, weekly_off_day
+            FROM departments
+            ORDER BY name
+            """
+        ).fetchall()
+
+
 def list_departments_with_weekly_off() -> list[sqlite3.Row]:
         with get_conn() as conn:
                 return conn.execute(

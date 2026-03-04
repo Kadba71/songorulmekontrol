@@ -230,6 +230,7 @@ def build_help_text() -> str:
         "/silsorumlu (sorumlu @), (departman) -> Departmandan sorumlu çıkarır.\n\n"
         "/ekledepartman (departman) -> Departman ekler.\n"
         "/sildepartman (departman) -> Departman siler.\n\n"
+        "/departmanlistesi -> Tüm kayıtlı departmanları listeler.\n\n"
         "/haftalikizin (departman), (gün) -> O gün departman kontrol edilmez.\n"
         "Örn: /haftalikizin satısekibi1, çarşamba\n\n"
         "/kontrolhaftalikizin -> Haftalık izin tanımlı departmanları listeler.\n\n"
@@ -432,6 +433,22 @@ async def ekledepartman_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     await db_call(database.add_department, name)
     await update.message.reply_text(f"Departman eklendi: {name}")
+
+
+async def departmanlistesi_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_auth(update):
+        return
+
+    rows = await db_call(database.list_departments)
+    if not rows:
+        await update.message.reply_text("Kayıtlı departman yok.")
+        return
+
+    lines = ["Kayıtlı departmanlar:"]
+    for row in rows:
+        lines.append(f"- {row['name']}")
+
+    await update.message.reply_text("\n".join(lines))
 
 
 async def haftalikizin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1040,32 +1057,29 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                     last_status_text=status_text,
                 )
         elif mins is None and status_text == "kullanıcı bulunamadı":
-            should_notify = state is None or not state["is_alerting"] or status_changed or _should_notify_again(last_notified_at, ALERT_COOLDOWN_MINUTES)
-
-            if should_notify:
-                department_mentions = ""
-                if r["department_id"] is not None:
-                    dep_responsibles = await db_call(database.get_department_responsibles, int(r["department_id"]))
-                    if dep_responsibles:
-                        department_mentions = "\nDepartman sorumluları : " + " ".join(f"@{u}" for u in dep_responsibles)
-                message = (
-                    "Kullanıcı bulunamadı.\n"
-                    f"Kullanıcı adı : @{username}\n"
-                    f"Sorumlu : {format_responsible(responsible)}\n"
-                    f"Departman : {department}"
-                    f"{department_mentions}"
-                )
-                sent_ok = await safe_send_message(context, target_chat_id, message)
-                if sent_ok:
-                    non_numeric_alerts += 1
-                await db_call(
-                    database.set_watch_state,
-                    personnel_id=personnel_id,
-                    is_alerting=True,
-                    last_notified_at=datetime.now(timezone.utc).isoformat(),
-                    last_minutes=None,
-                    last_status_text=status_text,
-                )
+            department_mentions = ""
+            if r["department_id"] is not None:
+                dep_responsibles = await db_call(database.get_department_responsibles, int(r["department_id"]))
+                if dep_responsibles:
+                    department_mentions = "\nDepartman sorumluları : " + " ".join(f"@{u}" for u in dep_responsibles)
+            message = (
+                "Kullanıcı bulunamadı.\n"
+                f"Kullanıcı adı : @{username}\n"
+                f"Sorumlu : {format_responsible(responsible)}\n"
+                f"Departman : {department}"
+                f"{department_mentions}"
+            )
+            sent_ok = await safe_send_message(context, target_chat_id, message)
+            if sent_ok:
+                non_numeric_alerts += 1
+            await db_call(
+                database.set_watch_state,
+                personnel_id=personnel_id,
+                is_alerting=True,
+                last_notified_at=datetime.now(timezone.utc).isoformat(),
+                last_minutes=None,
+                last_status_text=status_text,
+            )
         elif mins is None and should_notify_non_numeric_status(status_text):
             should_notify = state is None or not state["is_alerting"] or status_changed or _should_notify_again(last_notified_at, ALERT_COOLDOWN_MINUTES)
 
@@ -1237,6 +1251,7 @@ def build_app() -> Application:
     application.add_handler(CommandHandler("silsorumlu", silsorumlu_cmd))
     application.add_handler(CommandHandler("ekledepartman", ekledepartman_cmd))
     application.add_handler(CommandHandler("sildepartman", sildepartman_cmd))
+    application.add_handler(CommandHandler("departmanlistesi", departmanlistesi_cmd))
     application.add_handler(CommandHandler("haftalikizin", haftalikizin_cmd))
     application.add_handler(CommandHandler("kontrolhaftalikizin", kontrolhaftalikizin_cmd))
     application.add_handler(CommandHandler("izin", izin_cmd))
