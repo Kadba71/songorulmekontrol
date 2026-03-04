@@ -99,6 +99,46 @@ class MonitorJobTests(unittest.IsolatedAsyncioTestCase):
         context.bot.send_message.assert_not_awaited()
         list_personnel.assert_not_called()
 
+    async def test_monitor_job_notifies_when_username_not_found(self) -> None:
+        row = {
+            "id": 2,
+            "username": "kayip_kullanici",
+            "department_threshold_minutes": 10,
+            "responsible_username": "yonetici",
+            "department_name": "satis",
+            "department_weekly_off_day": None,
+            "day_off_date": None,
+            "exempt_until": None,
+            "department_id": None,
+        }
+
+        async def passthrough(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        context = type("Ctx", (), {})()
+        context.bot = type("DummyBot", (), {"send_message": AsyncMock()})()
+
+        with (
+            patch.object(bot, "db_call", new=passthrough),
+            patch.object(bot, "is_within_monitor_hours", return_value=True),
+            patch.object(bot, "resolve_target_chat_id", return_value=-100987654321),
+            patch.object(bot, "resolve_last_seen_minutes", new=AsyncMock(return_value=(None, "kullanıcı bulunamadı"))),
+            patch.object(bot.database, "get_break_window", return_value=(None, None)),
+            patch.object(bot.database, "list_personnel", return_value=[row]),
+            patch.object(bot.database, "get_watch_state", return_value=None),
+            patch.object(bot.database, "get_department_responsibles", return_value=[]),
+            patch.object(bot.database, "set_watch_state") as set_watch_state,
+        ):
+            await bot.monitor_job(context)
+
+        context.bot.send_message.assert_awaited_once()
+        sent_text = context.bot.send_message.await_args.kwargs["text"]
+        self.assertIn("Kullanıcı bulunamadı.", sent_text)
+        self.assertIn("Kullanıcı adı : @kayip_kullanici", sent_text)
+        self.assertIn("Sorumlu : @yonetici", sent_text)
+        self.assertIn("Departman : satis", sent_text)
+        set_watch_state.assert_called_once()
+
 
 class DailySummarySchedulerTests(unittest.IsolatedAsyncioTestCase):
     async def test_daily_summary_scheduler_sends_once_after_time(self) -> None:

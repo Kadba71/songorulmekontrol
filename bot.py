@@ -890,6 +890,9 @@ async def resolve_last_seen_minutes(username: str) -> tuple[int | None, str]:
         if isinstance(status, UserStatusEmpty):
             return None, "gizli"
         return None, "bilinmiyor"
+    except ValueError:
+        logger.warning("Telegram kullanıcı adı bulunamadı: %s", username)
+        return None, "kullanıcı bulunamadı"
     except Exception as exc:
         logger.exception("last seen alınamadı: %s", username)
         return None, f"hata: {type(exc).__name__}"
@@ -1034,6 +1037,33 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                     is_alerting=True,
                     last_notified_at=datetime.now(timezone.utc).isoformat(),
                     last_minutes=mins,
+                    last_status_text=status_text,
+                )
+        elif mins is None and status_text == "kullanıcı bulunamadı":
+            should_notify = state is None or not state["is_alerting"] or status_changed or _should_notify_again(last_notified_at, ALERT_COOLDOWN_MINUTES)
+
+            if should_notify:
+                department_mentions = ""
+                if r["department_id"] is not None:
+                    dep_responsibles = await db_call(database.get_department_responsibles, int(r["department_id"]))
+                    if dep_responsibles:
+                        department_mentions = "\nDepartman sorumluları : " + " ".join(f"@{u}" for u in dep_responsibles)
+                message = (
+                    "Kullanıcı bulunamadı.\n"
+                    f"Kullanıcı adı : @{username}\n"
+                    f"Sorumlu : {format_responsible(responsible)}\n"
+                    f"Departman : {department}"
+                    f"{department_mentions}"
+                )
+                sent_ok = await safe_send_message(context, target_chat_id, message)
+                if sent_ok:
+                    non_numeric_alerts += 1
+                await db_call(
+                    database.set_watch_state,
+                    personnel_id=personnel_id,
+                    is_alerting=True,
+                    last_notified_at=datetime.now(timezone.utc).isoformat(),
+                    last_minutes=None,
                     last_status_text=status_text,
                 )
         elif mins is None and should_notify_non_numeric_status(status_text):
