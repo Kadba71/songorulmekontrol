@@ -52,6 +52,7 @@ MONITOR_END_HOUR = int(os.getenv("MONITOR_END_HOUR", "19"))
 MONITOR_END_MINUTE = int(os.getenv("MONITOR_END_MINUTE", "0"))
 DAILY_REPORT_HOUR = int(os.getenv("DAILY_REPORT_HOUR", "19"))
 DAILY_REPORT_MINUTE = int(os.getenv("DAILY_REPORT_MINUTE", "30"))
+DAILY_REPORT_CHECK_INTERVAL_SECONDS = int(os.getenv("DAILY_REPORT_CHECK_INTERVAL_SECONDS", "60"))
 APP_TIMEZONE_NAME = os.getenv("APP_TIMEZONE", "Europe/Istanbul").strip() or "Europe/Istanbul"
 
 TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID", "0") or 0)
@@ -60,6 +61,7 @@ TELETHON_STRING_SESSION = os.getenv("TELETHON_STRING_SESSION", "")
 
 telethon_client: TelegramClient | None = None
 last_authorized_chat_id: int = 0
+DAILY_SUMMARY_LAST_SENT_KEY = "daily_summary_last_sent_date"
 
 def resolve_app_timezone(name: str):
     normalized = (name or "").strip()
@@ -184,6 +186,19 @@ def today_weekday_tr() -> str:
     return names[get_now_local().weekday()]
 
 
+def should_skip_for_department_weekly_off(
+    department_name: str | None,
+    weekly_off_day: str | None,
+    weekday_name: str | None = None,
+) -> bool:
+    if not (department_name or "").strip():
+        return False
+    normalized_weekly_off = normalize_weekday(weekly_off_day or "")
+    if not normalized_weekly_off:
+        return False
+    return normalized_weekly_off == (weekday_name or today_weekday_tr())
+
+
 def get_now_local() -> datetime:
     return datetime.now(APP_TIMEZONE)
 
@@ -201,6 +216,9 @@ def format_responsible(username: str | None) -> str:
 def build_help_text() -> str:
     return (
         "Komutlar ve açıklamalar:\n"
+        "/start -> Yardım metnini gösterir.\n"
+        "/yardim -> Yardım metnini gösterir.\n"
+        "/help -> Yardım metnini gösterir.\n\n"
         "/sure (dakika), (departman) -> Departman eşik süresini ayarlar.\n"
         "Örn: /sure 20, satısekibi1\n\n"
         "/sureguncelle (dakika), (departman) -> Departman süresini günceller.\n\n"
@@ -213,7 +231,9 @@ def build_help_text() -> str:
         "/sildepartman (departman) -> Departman siler.\n\n"
         "/haftalikizin (departman), (gün) -> O gün departman kontrol edilmez.\n"
         "Örn: /haftalikizin satısekibi1, çarşamba\n\n"
+        "/kontrolhaftalikizin -> Haftalık izin tanımlı departmanları listeler.\n\n"
         "/izin (personel @) -> Personel bugün kontrol edilmez.\n\n"
+        "/kontrolizin -> Aktif personel izinlerini listeler.\n\n"
         "/iziniptal (personel @), (departman) -> Personelin tam gün iznini iptal eder.\n"
         "Örn: /iziniptal @ahmet_taha, satısekibi1\n\n"
 
@@ -230,7 +250,7 @@ def build_help_text() -> str:
         "/listele -> Kayıtlı personelleri departman bazında listeler.\n"
         "/chatid -> Bulunduğun sohbetin chat id bilgisini verir.\n"
         "Otomatik: 09:45-19:00 arası kontrol, 19:30 gün sonu ihlal raporu.\n"
-        "/help -> Bu yardımı gösterir."
+        "Not: Komutlarda Türkçe karakter kullanmayın (ör: /kontrolhaftalikizin)."
     )
 
 
@@ -280,6 +300,7 @@ def validate_config() -> None:
     _validate_range("MONITOR_END_MINUTE", MONITOR_END_MINUTE, 0, 59)
     _validate_range("DAILY_REPORT_HOUR", DAILY_REPORT_HOUR, 0, 23)
     _validate_range("DAILY_REPORT_MINUTE", DAILY_REPORT_MINUTE, 0, 59)
+    _validate_range("DAILY_REPORT_CHECK_INTERVAL_SECONDS", DAILY_REPORT_CHECK_INTERVAL_SECONDS, 30, 3600)
 
 
 async def require_auth(update: Update) -> bool:
@@ -418,7 +439,7 @@ async def haftalikizin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     args_text = update.message.text.partition(" ")[2]
     parts = parse_csv_args(args_text)
     if len(parts) != 2:
-        await update.message.reply_text("Kullanım: /haftalıkizin satısekibi1, çarşamba")
+        await update.message.reply_text("Kullanım: /haftalikizin satısekibi1, çarşamba")
         return
 
     department = parts[0]
@@ -430,6 +451,24 @@ async def haftalikizin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     await db_call(database.set_department_weekly_off, department, weekday)
     await update.message.reply_text(f"Haftalık izin tanımlandı: {department} -> {weekday}")
+
+
+async def kontrolhaftalikizin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_auth(update):
+        return
+
+    rows = await db_call(database.list_departments_with_weekly_off)
+    if not rows:
+        await update.message.reply_text("Haftalık izin tanımlı departman yok.")
+        return
+
+    lines = ["Haftalık izin tanımlı departmanlar:"]
+    for row in rows:
+        department_name = row["name"] or "-"
+        weekly_off = normalize_weekday(row["weekly_off_day"] or "") or "-"
+        lines.append(f"- {department_name}: {weekly_off}")
+
+    await update.message.reply_text("\n".join(lines))
 
 
 async def izin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -505,6 +544,62 @@ async def iziniptal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if ok
         else "Aktif tam gün izin bulunamadı veya personel/departman eşleşmedi."
     )
+
+
+async def kontrolizin_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await require_auth(update):
+        return
+
+    records = await db_call(database.list_personnel)
+    if not records:
+        await update.message.reply_text("Kayıtlı personel yok.")
+        return
+
+    today_iso = get_today_local_iso()
+    now_utc = datetime.now(timezone.utc)
+    full_day_lines: list[str] = []
+    hourly_lines: list[str] = []
+
+    for row in records:
+        username = row["username"]
+        department = row["department_name"] or "-"
+
+        if row["day_off_date"] == today_iso:
+            full_day_lines.append(f"@{username} ({department}) - bugün")
+            continue
+
+        exempt_until = row["exempt_until"]
+        if not exempt_until:
+            continue
+
+        try:
+            until_dt = datetime.fromisoformat(exempt_until)
+        except ValueError:
+            continue
+        if until_dt.tzinfo is None:
+            until_dt = until_dt.replace(tzinfo=timezone.utc)
+        if until_dt <= now_utc:
+            continue
+
+        remaining_minutes = max(1, int((until_dt - now_utc).total_seconds() // 60))
+        until_local = until_dt.astimezone(APP_TIMEZONE).strftime("%H:%M")
+        hourly_lines.append(
+            f"@{username} ({department}) - {remaining_minutes} dk kaldı (bitiş {until_local})"
+        )
+
+    if not full_day_lines and not hourly_lines:
+        await update.message.reply_text("Aktif izinli personel yok.")
+        return
+
+    message_parts = ["Aktif izinli personeller:"]
+    if full_day_lines:
+        message_parts.append("\nTam gün izin:")
+        message_parts.extend(f"- {line}" for line in sorted(full_day_lines))
+    if hourly_lines:
+        message_parts.append("\nSaatlik izin:")
+        message_parts.extend(f"- {line}" for line in sorted(hourly_lines))
+
+    await update.message.reply_text("\n".join(message_parts))
 
 
 async def mola_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -842,16 +937,18 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.warning("ALERT_CHAT_ID ayarlı değil, bildirim atlanıyor.")
         return
 
+    today_name = today_weekday_tr()
+
     for r in records:
         personnel_id = int(r["id"])
         username = r["username"]
         dep_threshold = r["department_threshold_minutes"]
         threshold = int(dep_threshold) if dep_threshold is not None else DEFAULT_THRESHOLD_MINUTES
         responsible = r["responsible_username"]
-        department = r["department_name"] or "-"
-        weekly_off_day = normalize_weekday(r["department_weekly_off_day"] or "")
+        department_name = r["department_name"]
+        department = department_name or "-"
 
-        if weekly_off_day and weekly_off_day == today_weekday_tr():
+        if should_skip_for_department_weekly_off(department_name, r["department_weekly_off_day"], today_name):
             continue
 
         day_off_date = r["day_off_date"]
@@ -1002,6 +1099,22 @@ async def daily_summary_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     await context.bot.send_message(chat_id=target_chat_id, text=message)
 
 
+async def daily_summary_scheduler_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    now_local = get_now_local()
+    report_time = time(hour=DAILY_REPORT_HOUR, minute=DAILY_REPORT_MINUTE)
+
+    if now_local.time() < report_time:
+        return
+
+    today_iso = now_local.date().isoformat()
+    last_sent_date = await db_call(database.get_app_setting, DAILY_SUMMARY_LAST_SENT_KEY)
+    if last_sent_date == today_iso:
+        return
+
+    await daily_summary_job(context)
+    await db_call(database.set_app_setting, DAILY_SUMMARY_LAST_SENT_KEY, today_iso)
+
+
 async def init_telethon() -> None:
     global telethon_client
     if not (TELEGRAM_API_ID and TELEGRAM_API_HASH and TELETHON_STRING_SESSION):
@@ -1045,7 +1158,9 @@ def build_app() -> Application:
     application.add_handler(CommandHandler("ekledepartman", ekledepartman_cmd))
     application.add_handler(CommandHandler("sildepartman", sildepartman_cmd))
     application.add_handler(CommandHandler("haftalikizin", haftalikizin_cmd))
+    application.add_handler(CommandHandler("kontrolhaftalikizin", kontrolhaftalikizin_cmd))
     application.add_handler(CommandHandler("izin", izin_cmd))
+    application.add_handler(CommandHandler("kontrolizin", kontrolizin_cmd))
     application.add_handler(CommandHandler("saatlikizin", saatlikizin_cmd))
     application.add_handler(CommandHandler("iziniptal", iziniptal_cmd))
     application.add_handler(CommandHandler("saatlikiziniptal", saatlikiziniptal_cmd))
@@ -1062,10 +1177,11 @@ def build_app() -> Application:
         first=10,
         name="last-seen-monitor",
     )
-    application.job_queue.run_daily(
-        daily_summary_job,
-        time=time(hour=DAILY_REPORT_HOUR, minute=DAILY_REPORT_MINUTE, tzinfo=APP_TIMEZONE),
-        name="daily-violation-summary",
+    application.job_queue.run_repeating(
+        daily_summary_scheduler_job,
+        interval=DAILY_REPORT_CHECK_INTERVAL_SECONDS,
+        first=15,
+        name="daily-violation-summary-checker",
     )
     return application
 

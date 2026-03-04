@@ -300,6 +300,19 @@ def list_personnel() -> list[sqlite3.Row]:
         ).fetchall()
 
 
+def list_departments_with_weekly_off() -> list[sqlite3.Row]:
+        with get_conn() as conn:
+                return conn.execute(
+                        """
+                        SELECT id, name, weekly_off_day
+                        FROM departments
+                        WHERE weekly_off_day IS NOT NULL
+                            AND TRIM(weekly_off_day) != ''
+                        ORDER BY name
+                        """
+                ).fetchall()
+
+
 def get_department_responsibles(department_id: int) -> list[str]:
     with get_conn() as conn:
         rows = conn.execute(
@@ -471,6 +484,33 @@ def set_break_window(start_hhmm: str, end_hhmm: str) -> None:
             """,
             ("break_end_hhmm", end_hhmm, now_iso),
         )
+
+
+def set_app_setting(key: str, value: str) -> None:
+    setting_key = key.strip()
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_settings(key, value, updated_at)
+            VALUES(?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """,
+            (setting_key, value, _utcnow_iso()),
+        )
+
+
+def get_app_setting(key: str) -> str | None:
+    setting_key = key.strip()
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT value FROM app_settings WHERE key = ?",
+            (setting_key,),
+        ).fetchone()
+    if row is None:
+        return None
+    return str(row["value"])
 
 
 def get_break_window() -> tuple[str | None, str | None]:

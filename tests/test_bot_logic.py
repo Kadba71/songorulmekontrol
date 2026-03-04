@@ -26,6 +26,17 @@ class BotUtilityTests(unittest.TestCase):
         after_resume = datetime(2026, 3, 2, 15, 10, tzinfo=ZoneInfo("Europe/Istanbul"))
         self.assertFalse(bot.should_skip_for_break_window(after_resume, "14:00", "15:00"))
 
+    def test_should_skip_for_department_weekly_off(self) -> None:
+        self.assertTrue(
+            bot.should_skip_for_department_weekly_off("satis", "çarşamba", "çarşamba")
+        )
+        self.assertFalse(
+            bot.should_skip_for_department_weekly_off("satis", "çarşamba", "salı")
+        )
+        self.assertFalse(
+            bot.should_skip_for_department_weekly_off(None, "çarşamba", "çarşamba")
+        )
+
 
 class MonitorJobTests(unittest.IsolatedAsyncioTestCase):
     async def test_monitor_job_sends_alert_and_handles_empty_responsible(self) -> None:
@@ -87,6 +98,49 @@ class MonitorJobTests(unittest.IsolatedAsyncioTestCase):
 
         context.bot.send_message.assert_not_awaited()
         list_personnel.assert_not_called()
+
+
+class DailySummarySchedulerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_daily_summary_scheduler_sends_once_after_time(self) -> None:
+        async def passthrough(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        context = type("Ctx", (), {})()
+        now_local = datetime(2026, 3, 2, 19, 35, tzinfo=ZoneInfo("Europe/Istanbul"))
+
+        with (
+            patch.object(bot, "db_call", new=passthrough),
+            patch.object(bot, "get_now_local", return_value=now_local),
+            patch.object(bot.database, "get_app_setting", return_value=None),
+            patch.object(bot, "daily_summary_job", new=AsyncMock()) as daily_summary_job,
+            patch.object(bot.database, "set_app_setting") as set_app_setting,
+        ):
+            await bot.daily_summary_scheduler_job(context)
+
+        daily_summary_job.assert_awaited_once()
+        set_app_setting.assert_called_once_with(
+            bot.DAILY_SUMMARY_LAST_SENT_KEY,
+            "2026-03-02",
+        )
+
+    async def test_daily_summary_scheduler_skips_if_already_sent_today(self) -> None:
+        async def passthrough(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        context = type("Ctx", (), {})()
+        now_local = datetime(2026, 3, 2, 20, 5, tzinfo=ZoneInfo("Europe/Istanbul"))
+
+        with (
+            patch.object(bot, "db_call", new=passthrough),
+            patch.object(bot, "get_now_local", return_value=now_local),
+            patch.object(bot.database, "get_app_setting", return_value="2026-03-02"),
+            patch.object(bot, "daily_summary_job", new=AsyncMock()) as daily_summary_job,
+            patch.object(bot.database, "set_app_setting") as set_app_setting,
+        ):
+            await bot.daily_summary_scheduler_job(context)
+
+        daily_summary_job.assert_not_awaited()
+        set_app_setting.assert_not_called()
 
 
 if __name__ == "__main__":
