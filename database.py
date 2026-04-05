@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import unicodedata
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -198,6 +199,23 @@ def remove_department(name: str) -> bool:
         return cur.rowcount > 0
 
 
+def _normalize_department_name(name: str) -> str:
+    folded = name.strip().casefold()
+    decomposed = unicodedata.normalize("NFKD", folded)
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
+def _find_department_row_by_name(conn: sqlite3.Connection, department_name: str) -> sqlite3.Row | None:
+    normalized_name = _normalize_department_name(department_name)
+    rows = conn.execute(
+        "SELECT id, name FROM departments"
+    ).fetchall()
+    for row in rows:
+        if _normalize_department_name(str(row["name"])) == normalized_name:
+            return row
+    return None
+
+
 def add_department_responsible(department_name: str, responsible_username: str) -> tuple[str, str]:
     with get_conn() as conn:
         department_id = _get_department_id(conn, department_name)
@@ -216,7 +234,7 @@ def remove_department_responsible(department_name: str, responsible_username: st
     department_name = department_name.strip()
     responsible_username = normalize_username(responsible_username)
     with get_conn() as conn:
-        dep_row = conn.execute("SELECT id FROM departments WHERE name = ?", (department_name,)).fetchone()
+        dep_row = _find_department_row_by_name(conn, department_name)
         rsp_row = conn.execute("SELECT id FROM responsibles WHERE username = ?", (responsible_username,)).fetchone()
         if dep_row is None or rsp_row is None:
             return False

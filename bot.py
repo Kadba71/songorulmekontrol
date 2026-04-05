@@ -214,6 +214,18 @@ def format_responsible(username: str | None) -> str:
     return f"@{username}"
 
 
+def build_responsible_text(direct_responsible: str | None, department_responsibles: list[str] | None = None) -> str:
+    responsibles: list[str] = []
+    if direct_responsible:
+        responsibles.append(format_responsible(direct_responsible))
+    if department_responsibles:
+        for username in department_responsibles:
+            mention = format_responsible(username)
+            if mention not in responsibles:
+                responsibles.append(mention)
+    return ", ".join(responsibles) if responsibles else "-"
+
+
 def build_help_text() -> str:
     return (
         "Komutlar ve açıklamalar:\n"
@@ -228,6 +240,8 @@ def build_help_text() -> str:
         "/silpersonel (personel @) -> Personeli siler.\n\n"
         "/eklesorumlu (sorumlu @), (departman) -> Departmana sorumlu ekler.\n"
         "/silsorumlu (sorumlu @), (departman) -> Departmandan sorumlu çıkarır.\n\n"
+        "/sorumluekle (sorumlu @), (departman) -> /eklesorumlu ile aynı işlemi yapar.\n"
+        "/sorumlusil (sorumlu @), (departman) -> /silsorumlu ile aynı işlemi yapar.\n\n"
         "/ekledepartman (departman) -> Departman ekler.\n"
         "/sildepartman (departman) -> Departman siler.\n\n"
         "/departmanlistesi -> Tüm kayıtlı departmanları listeler.\n\n"
@@ -408,6 +422,10 @@ async def eklesorumlu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.message.reply_text(f"Departmana sorumlu eklendi: {dep_name} -> @{username}")
 
 
+async def sorumluekle_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await eklesorumlu_cmd(update, context)
+
+
 async def silsorumlu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await require_auth(update):
         return
@@ -422,6 +440,10 @@ async def silsorumlu_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text(
         "Sorumlu departmandan silindi." if ok else "Eşleşen sorumlu/departman bulunamadı."
     )
+
+
+async def sorumlusil_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await silsorumlu_cmd(update, context)
 
 
 async def ekledepartman_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1025,17 +1047,14 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             should_notify = state is None or not state["is_alerting"] or _should_notify_again(last_notified_at, ALERT_COOLDOWN_MINUTES)
 
             if should_notify:
-                department_mentions = ""
+                department_responsibles: list[str] = []
                 if r["department_id"] is not None:
-                    dep_responsibles = await db_call(database.get_department_responsibles, int(r["department_id"]))
-                    if dep_responsibles:
-                        department_mentions = "\nDepartman sorumluları : " + " ".join(f"@{u}" for u in dep_responsibles)
+                    department_responsibles = await db_call(database.get_department_responsibles, int(r["department_id"]))
                 message = (
                     f"Personel : @{username}\n"
                     f"Son görülme : {mins} dakika\n"
-                    f"Sorumlu : {format_responsible(responsible)}\n"
+                    f"Sorumlu : {build_responsible_text(responsible, department_responsibles)}\n"
                     f"Departman : {department}"
-                    f"{department_mentions}"
                 )
                 sent_ok = await safe_send_message(context, target_chat_id, message)
                 if sent_ok:
@@ -1057,17 +1076,14 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
                     last_status_text=status_text,
                 )
         elif mins is None and status_text == "kullanıcı bulunamadı":
-            department_mentions = ""
+            department_responsibles: list[str] = []
             if r["department_id"] is not None:
-                dep_responsibles = await db_call(database.get_department_responsibles, int(r["department_id"]))
-                if dep_responsibles:
-                    department_mentions = "\nDepartman sorumluları : " + " ".join(f"@{u}" for u in dep_responsibles)
+                department_responsibles = await db_call(database.get_department_responsibles, int(r["department_id"]))
             message = (
                 "Kullanıcı bulunamadı.\n"
                 f"Kullanıcı adı : @{username}\n"
-                f"Sorumlu : {format_responsible(responsible)}\n"
+                f"Sorumlu : {build_responsible_text(responsible, department_responsibles)}\n"
                 f"Departman : {department}"
-                f"{department_mentions}"
             )
             sent_ok = await safe_send_message(context, target_chat_id, message)
             if sent_ok:
@@ -1084,17 +1100,14 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             should_notify = state is None or not state["is_alerting"] or status_changed or _should_notify_again(last_notified_at, ALERT_COOLDOWN_MINUTES)
 
             if should_notify:
-                department_mentions = ""
+                department_responsibles: list[str] = []
                 if r["department_id"] is not None:
-                    dep_responsibles = await db_call(database.get_department_responsibles, int(r["department_id"]))
-                    if dep_responsibles:
-                        department_mentions = "\nDepartman sorumluları : " + " ".join(f"@{u}" for u in dep_responsibles)
+                    department_responsibles = await db_call(database.get_department_responsibles, int(r["department_id"]))
                 message = (
                     f"Personel : @{username}\n"
                     f"Son görülme : {status_text} (dakika bilgisi yok)\n"
-                    f"Sorumlu : {format_responsible(responsible)}\n"
+                    f"Sorumlu : {build_responsible_text(responsible, department_responsibles)}\n"
                     f"Departman : {department}"
-                    f"{department_mentions}"
                 )
                 sent_ok = await safe_send_message(context, target_chat_id, message)
                 if sent_ok:
@@ -1248,7 +1261,9 @@ def build_app() -> Application:
     application.add_handler(CommandHandler("personelekle", personelekle_cmd))
     application.add_handler(CommandHandler("silpersonel", silpersonel_cmd))
     application.add_handler(CommandHandler("eklesorumlu", eklesorumlu_cmd))
+    application.add_handler(CommandHandler("sorumluekle", sorumluekle_cmd))
     application.add_handler(CommandHandler("silsorumlu", silsorumlu_cmd))
+    application.add_handler(CommandHandler("sorumlusil", sorumlusil_cmd))
     application.add_handler(CommandHandler("ekledepartman", ekledepartman_cmd))
     application.add_handler(CommandHandler("sildepartman", sildepartman_cmd))
     application.add_handler(CommandHandler("departmanlistesi", departmanlistesi_cmd))

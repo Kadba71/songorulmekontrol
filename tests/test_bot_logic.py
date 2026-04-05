@@ -19,6 +19,13 @@ class BotUtilityTests(unittest.TestCase):
         self.assertEqual(bot.format_responsible("-"), "-")
         self.assertEqual(bot.format_responsible("manager"), "@manager")
 
+    def test_build_responsible_text_merges_unique_mentions(self) -> None:
+        self.assertEqual(
+            bot.build_responsible_text("manager", ["manager", "lead"]),
+            "@manager, @lead",
+        )
+        self.assertEqual(bot.build_responsible_text(None, []), "-")
+
     def test_should_skip_for_break_window(self) -> None:
         now_local = datetime(2026, 3, 2, 14, 30, tzinfo=ZoneInfo("Europe/Istanbul"))
         self.assertTrue(bot.should_skip_for_break_window(now_local, "14:00", "15:00"))
@@ -77,6 +84,43 @@ class MonitorJobTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Sorumlu : -", sent_text)
         add_violation_event.assert_called_once()
         set_watch_state.assert_called_once()
+
+    async def test_monitor_job_merges_department_responsibles_into_sorumlu_line(self) -> None:
+        row = {
+            "id": 4,
+            "username": "bulent_nww",
+            "department_threshold_minutes": 10,
+            "responsible_username": "ceng_ext78",
+            "department_name": "DÖNÜŞÜM AS EKİP",
+            "department_weekly_off_day": None,
+            "day_off_date": None,
+            "exempt_until": None,
+            "department_id": 8,
+        }
+
+        async def passthrough(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        context = type("Ctx", (), {})()
+        context.bot = type("DummyBot", (), {"send_message": AsyncMock()})()
+
+        with (
+            patch.object(bot, "db_call", new=passthrough),
+            patch.object(bot, "is_within_monitor_hours", return_value=True),
+            patch.object(bot, "resolve_target_chat_id", return_value=-100987654321),
+            patch.object(bot, "resolve_last_seen_minutes", new=AsyncMock(return_value=(50, "50 dakika"))),
+            patch.object(bot.database, "get_break_window", return_value=(None, None)),
+            patch.object(bot.database, "list_personnel", return_value=[row]),
+            patch.object(bot.database, "get_watch_state", return_value=None),
+            patch.object(bot.database, "get_department_responsibles", return_value=["ercanbusiness", "ceng_ext78"]),
+            patch.object(bot.database, "add_violation_event"),
+            patch.object(bot.database, "set_watch_state"),
+        ):
+            await bot.monitor_job(context)
+
+        sent_text = context.bot.send_message.await_args.kwargs["text"]
+        self.assertIn("Sorumlu : @ceng_ext78, @ercanbusiness", sent_text)
+        self.assertNotIn("Departman sorumluları", sent_text)
 
     async def test_monitor_job_skips_during_break_window(self) -> None:
         context = type("Ctx", (), {})()
