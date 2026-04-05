@@ -200,7 +200,8 @@ def remove_department(name: str) -> bool:
 
 
 def _normalize_department_name(name: str) -> str:
-    folded = name.strip().casefold()
+    collapsed = " ".join(name.split())
+    folded = collapsed.casefold()
     decomposed = unicodedata.normalize("NFKD", folded)
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
 

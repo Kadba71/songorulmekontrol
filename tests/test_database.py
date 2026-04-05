@@ -122,6 +122,18 @@ class DatabaseTests(unittest.TestCase):
             finally:
                 database.DB_PATH = original_db_path
 
+    def test_remove_department_responsible_matches_department_with_irregular_spaces(self) -> None:
+        original_db_path = database.DB_PATH
+        with tempfile.TemporaryDirectory() as tmpdir:
+            database.DB_PATH = Path(tmpdir) / "test_bot_data.sqlite3"
+            try:
+                database.init_db()
+                database.add_department_responsible("DÖNÜŞÜM   AS   EKİP", "@ceng_ext78")
+
+                self.assertTrue(database.remove_department_responsible("DÖNÜŞÜM AS EKİP", "@ceng_ext78"))
+            finally:
+                database.DB_PATH = original_db_path
+
 
 if __name__ == "__main__":
     unittest.main()
