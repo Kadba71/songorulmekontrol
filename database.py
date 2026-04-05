@@ -239,11 +239,15 @@ def remove_department_responsible(department_name: str, responsible_username: st
         rsp_row = conn.execute("SELECT id FROM responsibles WHERE username = ?", (responsible_username,)).fetchone()
         if dep_row is None or rsp_row is None:
             return False
-        cur = conn.execute(
+        department_cur = conn.execute(
             "DELETE FROM department_responsibles WHERE department_id = ? AND responsible_id = ?",
             (int(dep_row["id"]), int(rsp_row["id"])),
         )
-        return cur.rowcount > 0
+        personnel_cur = conn.execute(
+            "UPDATE personnel SET responsible_id = NULL WHERE department_id = ? AND responsible_id = ?",
+            (int(dep_row["id"]), int(rsp_row["id"])),
+        )
+        return department_cur.rowcount > 0 or personnel_cur.rowcount > 0
 
 
 def _get_responsible_id(conn: sqlite3.Connection, username: str) -> int:
