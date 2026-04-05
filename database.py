@@ -66,6 +66,8 @@ def init_db() -> None:
                 username TEXT NOT NULL UNIQUE,
                 responsible_id INTEGER,
                 department_id INTEGER,
+                cached_entity_id INTEGER,
+                cached_access_hash INTEGER,
                 threshold_minutes INTEGER NOT NULL,
                 day_off_date TEXT,
                 exempt_until TEXT,
@@ -121,6 +123,8 @@ def init_db() -> None:
         )
         _ensure_column(conn, "departments", "threshold_minutes", "INTEGER")
         _ensure_column(conn, "departments", "weekly_off_day", "TEXT")
+        _ensure_column(conn, "personnel", "cached_entity_id", "INTEGER")
+        _ensure_column(conn, "personnel", "cached_access_hash", "INTEGER")
         _ensure_column(conn, "personnel", "day_off_date", "TEXT")
         _ensure_column(conn, "personnel", "exempt_until", "TEXT")
 
@@ -306,6 +310,8 @@ def list_personnel() -> list[sqlite3.Row]:
             SELECT
                 p.id,
                 p.username,
+                p.cached_entity_id,
+                p.cached_access_hash,
                 p.threshold_minutes,
                 p.day_off_date,
                 p.exempt_until,
@@ -321,6 +327,18 @@ def list_personnel() -> list[sqlite3.Row]:
             ORDER BY p.username
             """
         ).fetchall()
+
+
+def update_personnel_entity_cache(
+    personnel_id: int,
+    entity_id: int | None,
+    access_hash: int | None,
+) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE personnel SET cached_entity_id = ?, cached_access_hash = ? WHERE id = ?",
+            (entity_id, access_hash, personnel_id),
+        )
 
 
 def list_departments() -> list[sqlite3.Row]:

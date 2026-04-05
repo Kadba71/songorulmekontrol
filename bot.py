@@ -14,6 +14,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.types import (
+    InputPeerUser,
     UserStatusEmpty,
     UserStatusLastMonth,
     UserStatusLastWeek,
@@ -907,34 +908,67 @@ def _minutes_since(dt: datetime) -> int:
     return max(0, int((now - dt).total_seconds() // 60))
 
 
-async def resolve_last_seen_minutes(username: str) -> tuple[int | None, str]:
+def _extract_entity_cache(user) -> tuple[int | None, int | None]:
+    entity_id = getattr(user, "id", None)
+    access_hash = getattr(user, "access_hash", None)
+    return entity_id, access_hash
+
+
+def _status_from_telethon_user(user) -> tuple[int | None, str]:
+    status = getattr(user, "status", None)
+    if isinstance(status, UserStatusOnline):
+        return 0, "çevrimiçi"
+    if isinstance(status, UserStatusOffline):
+        if status.was_online:
+            mins = _minutes_since(status.was_online)
+            return mins, f"{mins} dakika"
+        return None, "çevrimdışı (zaman bilgisi yok)"
+    if isinstance(status, UserStatusRecently):
+        return None, "yakınlarda"
+    if isinstance(status, UserStatusLastWeek):
+        return None, "son 1 hafta içinde"
+    if isinstance(status, UserStatusLastMonth):
+        return None, "son 1 ay içinde"
+    if isinstance(status, UserStatusEmpty):
+        return None, "gizli"
+    return None, "bilinmiyor"
+
+
+async def resolve_last_seen_with_cache(
+    username: str,
+    cached_entity_id: int | None,
+    cached_access_hash: int | None,
+) -> tuple[int | None, str, int | None, int | None]:
     if telethon_client is None:
-        return None, "Telethon kapalı"
+        return None, "Telethon kapalı", cached_entity_id, cached_access_hash
+
+    if cached_entity_id is not None and cached_access_hash is not None:
+        try:
+            user = await telethon_client.get_entity(
+                InputPeerUser(int(cached_entity_id), int(cached_access_hash))
+            )
+            mins, status_text = _status_from_telethon_user(user)
+            entity_id, access_hash = _extract_entity_cache(user)
+            return mins, status_text, entity_id, access_hash
+        except Exception:
+            logger.debug("Entity cache kullanılamadı, username resolve denenecek: %s", username)
+
     try:
         user = await telethon_client.get_entity(username)
-        status = getattr(user, "status", None)
-        if isinstance(status, UserStatusOnline):
-            return 0, "çevrimiçi"
-        if isinstance(status, UserStatusOffline):
-            if status.was_online:
-                mins = _minutes_since(status.was_online)
-                return mins, f"{mins} dakika"
-            return None, "çevrimdışı (zaman bilgisi yok)"
-        if isinstance(status, UserStatusRecently):
-            return None, "yakınlarda"
-        if isinstance(status, UserStatusLastWeek):
-            return None, "son 1 hafta içinde"
-        if isinstance(status, UserStatusLastMonth):
-            return None, "son 1 ay içinde"
-        if isinstance(status, UserStatusEmpty):
-            return None, "gizli"
-        return None, "bilinmiyor"
+        mins, status_text = _status_from_telethon_user(user)
+        entity_id, access_hash = _extract_entity_cache(user)
+        return mins, status_text, entity_id, access_hash
     except ValueError:
         logger.warning("Telegram kullanıcı adı bulunamadı: %s", username)
-        return None, "kullanıcı bulunamadı"
+        return None, "kullanıcı bulunamadı", None, None
     except Exception as exc:
         logger.exception("last seen alınamadı: %s", username)
-        return None, f"hata: {type(exc).__name__}"
+        return None, f"hata: {type(exc).__name__}", cached_entity_id, cached_access_hash
+
+
+async def resolve_last_seen_minutes(username: str) -> tuple[int | None, str]:
+    mins, status_text, _, _ = await resolve_last_seen_with_cache(username, None, None)
+    return mins, status_text
 
 
 def _should_notify_again(last_notified_at: str | None, cooldown_minutes: int) -> bool:
@@ -1038,7 +1072,23 @@ async def monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             except ValueError:
                 pass
 
-        mins, status_text = await resolve_last_seen_minutes(username)
+        cached_entity_id = r.get("cached_entity_id") if hasattr(r, "get") else r["cached_entity_id"]
+        cached_access_hash = r.get("cached_access_hash") if hasattr(r, "get") else r["cached_access_hash"]
+        mins, status_text, resolved_entity_id, resolved_access_hash = await resolve_last_seen_with_cache(
+            username,
+            cached_entity_id,
+            cached_access_hash,
+        )
+        if (
+            resolved_entity_id != cached_entity_id
+            or resolved_access_hash != cached_access_hash
+        ):
+            await db_call(
+                database.update_personnel_entity_cache,
+                personnel_id,
+                resolved_entity_id,
+                resolved_access_hash,
+            )
         state = await db_call(database.get_watch_state, personnel_id)
         last_notified_at = state["last_notified_at"] if state else None
         status_changed = state is not None and state["last_status_text"] != status_text

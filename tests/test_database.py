@@ -110,6 +110,24 @@ class DatabaseTests(unittest.TestCase):
             finally:
                 database.DB_PATH = original_db_path
 
+    def test_update_personnel_entity_cache(self) -> None:
+        original_db_path = database.DB_PATH
+        with tempfile.TemporaryDirectory() as tmpdir:
+            database.DB_PATH = Path(tmpdir) / "test_bot_data.sqlite3"
+            try:
+                database.init_db()
+                database.add_personnel("@ali", "@yonetici", "satis")
+
+                rows = database.list_personnel()
+                personnel_id = int(rows[0]["id"])
+                database.update_personnel_entity_cache(personnel_id, 12345, 67890)
+
+                updated_rows = database.list_personnel()
+                self.assertEqual(updated_rows[0]["cached_entity_id"], 12345)
+                self.assertEqual(updated_rows[0]["cached_access_hash"], 67890)
+            finally:
+                database.DB_PATH = original_db_path
+
     def test_remove_department_responsible_matches_department_case_insensitively(self) -> None:
         original_db_path = database.DB_PATH
         with tempfile.TemporaryDirectory() as tmpdir:

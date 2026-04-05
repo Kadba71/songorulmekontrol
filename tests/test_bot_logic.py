@@ -3,6 +3,8 @@ from unittest.mock import AsyncMock, patch
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from telethon.tl.types import InputPeerUser, UserStatusOnline
+
 import bot
 
 
@@ -45,6 +47,31 @@ class BotUtilityTests(unittest.TestCase):
         )
 
 
+class ResolveLastSeenCacheTests(unittest.IsolatedAsyncioTestCase):
+    async def test_resolve_last_seen_with_cache_uses_cached_entity(self) -> None:
+        class DummyUser:
+            id = 111
+            access_hash = 222
+            status = UserStatusOnline(expires=datetime.now())
+
+        client = type("DummyClient", (), {"get_entity": AsyncMock(return_value=DummyUser())})()
+
+        with patch.object(bot, "telethon_client", client):
+            mins, status_text, entity_id, access_hash = await bot.resolve_last_seen_with_cache(
+                "ali",
+                111,
+                222,
+            )
+
+        client.get_entity.assert_awaited_once()
+        peer = client.get_entity.await_args.args[0]
+        self.assertIsInstance(peer, InputPeerUser)
+        self.assertEqual(mins, 0)
+        self.assertEqual(status_text, "çevrimiçi")
+        self.assertEqual(entity_id, 111)
+        self.assertEqual(access_hash, 222)
+
+
 class MonitorJobTests(unittest.IsolatedAsyncioTestCase):
     async def test_monitor_job_sends_alert_and_handles_empty_responsible(self) -> None:
         row = {
@@ -69,7 +96,7 @@ class MonitorJobTests(unittest.IsolatedAsyncioTestCase):
             patch.object(bot, "db_call", new=passthrough),
             patch.object(bot, "is_within_monitor_hours", return_value=True),
             patch.object(bot, "resolve_target_chat_id", return_value=-100987654321),
-            patch.object(bot, "resolve_last_seen_minutes", new=AsyncMock(return_value=(15, "15 dakika"))),
+            patch.object(bot, "resolve_last_seen_with_cache", new=AsyncMock(return_value=(15, "15 dakika", None, None))),
             patch.object(bot.database, "get_break_window", return_value=(None, None)),
             patch.object(bot.database, "list_personnel", return_value=[row]),
             patch.object(bot.database, "get_watch_state", return_value=None),
@@ -108,7 +135,7 @@ class MonitorJobTests(unittest.IsolatedAsyncioTestCase):
             patch.object(bot, "db_call", new=passthrough),
             patch.object(bot, "is_within_monitor_hours", return_value=True),
             patch.object(bot, "resolve_target_chat_id", return_value=-100987654321),
-            patch.object(bot, "resolve_last_seen_minutes", new=AsyncMock(return_value=(50, "50 dakika"))),
+            patch.object(bot, "resolve_last_seen_with_cache", new=AsyncMock(return_value=(50, "50 dakika", None, None))),
             patch.object(bot.database, "get_break_window", return_value=(None, None)),
             patch.object(bot.database, "list_personnel", return_value=[row]),
             patch.object(bot.database, "get_watch_state", return_value=None),
@@ -166,7 +193,7 @@ class MonitorJobTests(unittest.IsolatedAsyncioTestCase):
             patch.object(bot, "db_call", new=passthrough),
             patch.object(bot, "is_within_monitor_hours", return_value=True),
             patch.object(bot, "resolve_target_chat_id", return_value=-100987654321),
-            patch.object(bot, "resolve_last_seen_minutes", new=AsyncMock(return_value=(None, "kullanıcı bulunamadı"))),
+            patch.object(bot, "resolve_last_seen_with_cache", new=AsyncMock(return_value=(None, "kullanıcı bulunamadı", None, None))),
             patch.object(bot.database, "get_break_window", return_value=(None, None)),
             patch.object(bot.database, "list_personnel", return_value=[row]),
             patch.object(bot.database, "get_watch_state", return_value=None),
@@ -212,7 +239,7 @@ class MonitorJobTests(unittest.IsolatedAsyncioTestCase):
             patch.object(bot, "db_call", new=passthrough),
             patch.object(bot, "is_within_monitor_hours", return_value=True),
             patch.object(bot, "resolve_target_chat_id", return_value=-100987654321),
-            patch.object(bot, "resolve_last_seen_minutes", new=AsyncMock(return_value=(None, "kullanıcı bulunamadı"))),
+            patch.object(bot, "resolve_last_seen_with_cache", new=AsyncMock(return_value=(None, "kullanıcı bulunamadı", None, None))),
             patch.object(bot.database, "get_break_window", return_value=(None, None)),
             patch.object(bot.database, "list_personnel", return_value=[row]),
             patch.object(bot.database, "get_watch_state", return_value=state_row),
